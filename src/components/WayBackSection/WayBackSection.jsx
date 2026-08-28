@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, Feather, MapPin, Users, ArrowDown } from 'lucide-react';
+import { ShieldCheck, Feather, MapPin, Users, ArrowDown, Sun } from 'lucide-react';
+import RayOfHopeCanvas from './RayOfHopeCanvas';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
 gsap.registerPlugin(ScrollTrigger);
 
 /**
- * WayBackSection Component — Step 6 hopeful conservation journey section
+ * WayBackSection Component — "THEY CAN COME BACK." section upgraded with 3D "Ray of Hope" sunrise environment
  */
 export default function WayBackSection() {
-  const [activeCard, setActiveCard] = useState(0); // Default first card selected
-  
+  const [activeCard, setActiveCard] = useState(0);
+
   const sectionRef = useRef(null);
   const headerRef = useRef(null);
   const statementRef = useRef(null);
@@ -24,7 +25,6 @@ export default function WayBackSection() {
       icon: ShieldCheck,
       description: 'Replacing harmful veterinary drugs with vulture-safe alternatives is one of the most important steps in preventing poisoning.',
       detail: 'Alternative drugs like meloxicam provide safe relief for livestock without threatening scavenger bird populations.',
-      graphicType: 'safe-medicine',
     },
     {
       id: 1,
@@ -34,7 +34,6 @@ export default function WayBackSection() {
       icon: Feather,
       description: 'Conservation breeding programmes help maintain populations and can support the release of vultures back into suitable habitats.',
       detail: 'Conservation breeding centers across India safeguard genetic diversity until safe natural habitats are secured.',
-      graphicType: 'breeding-release',
     },
     {
       id: 2,
@@ -44,7 +43,6 @@ export default function WayBackSection() {
       icon: MapPin,
       description: 'Protecting nesting, roosting and feeding areas gives vultures the space and resources they need to survive.',
       detail: 'Establishing Vulture Safe Zones ensures pesticide-free feeding sanctuaries across critical migration routes.',
-      graphicType: 'safe-habitats',
     },
     {
       id: 3,
@@ -54,13 +52,11 @@ export default function WayBackSection() {
       icon: Users,
       description: 'Farmers, veterinarians, conservationists and local communities all play a role in creating safer landscapes for vultures.',
       detail: 'Local awareness initiatives empower livestock owners and vets to champion vulture-safe practices.',
-      graphicType: 'community-action',
     },
   ];
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      // Header animation
       if (headerRef.current) {
         gsap.fromTo(
           headerRef.current.children,
@@ -80,7 +76,6 @@ export default function WayBackSection() {
         );
       }
 
-      // Hopeful Statement animation
       if (statementRef.current) {
         gsap.fromTo(
           statementRef.current.children,
@@ -105,20 +100,27 @@ export default function WayBackSection() {
   }, []);
 
   return (
-    <section className="way-back-section" id="way-back" ref={sectionRef}>
+    <section className="way-back-section ray-of-hope-theme" id="way-back" ref={sectionRef}>
+      {/* 3D "Ray of Hope" Procedural Environment Canvas Background */}
+      <RayOfHopeCanvas />
+
+      {/* Warm Sunrise Beam Overlay Gradient */}
+      <div className="ray-of-hope-overlay-light" />
+
       <div className="way-back-container">
         {/* Header */}
         <div className="way-back-header" ref={headerRef}>
-          <div className="section-eyebrow eyebrow-cream">
-            <span className="eyebrow-dot dot-gold" />
-            <span>The Way Back</span>
+          <div className="section-eyebrow eyebrow-hope">
+            <Sun size={16} className="eyebrow-sun-icon" />
+            <span>THE WAY BACK &bull; A RAY OF HOPE</span>
           </div>
 
-          <h2 className="way-back-title">
-            They Can <span className="highlight-cream-gold">Come Back.</span>
+          <h2 className="way-back-title hope-title">
+            <span className="title-dark-green">They Can </span>
+            <span className="highlight-hope-gold">Come Back.</span>
           </h2>
 
-          <p className="way-back-intro">
+          <p className="way-back-intro hope-intro">
             Vulture conservation is already making a difference. Protecting safe food sources, breeding populations, habitats and responsible veterinary practices can give these remarkable birds a future.
           </p>
         </div>
@@ -132,7 +134,7 @@ export default function WayBackSection() {
             return (
               <div
                 key={card.num}
-                className={`conservation-card ${isSelected ? 'selected' : 'subdued'}`}
+                className={`conservation-card hope-card ${isSelected ? 'selected' : 'subdued'}`}
                 onClick={() => setActiveCard(index)}
                 onMouseEnter={() => setActiveCard(index)}
                 role="button"
@@ -145,7 +147,7 @@ export default function WayBackSection() {
                 aria-label={`Inspect ${card.title}`}
               >
                 <div className="card-top-row">
-                  <div className="card-badge">
+                  <div className="card-badge hope-badge">
                     <IconComp size={20} className="card-icon" />
                     <span className="card-num">{card.num}</span>
                   </div>
@@ -160,14 +162,14 @@ export default function WayBackSection() {
                   <p className="detail-text">{card.detail}</p>
                 </div>
 
-                <div className="card-accent-bar" />
+                <div className="card-accent-bar hope-accent" />
               </div>
             );
           })}
         </div>
 
-        {/* Powerful Hopeful Statement Banner */}
-        <div className="hopeful-statement-banner" ref={statementRef}>
+        {/* Hopeful Statement Banner */}
+        <div className="hopeful-statement-banner hope-banner" ref={statementRef}>
           <h3 className="statement-line-1">CONSERVATION IS NOT JUST ABOUT SAVING A BIRD.</h3>
           <h4 className="statement-line-2">IT&apos;S ABOUT KEEPING AN ECOSYSTEM ALIVE.</h4>
 
