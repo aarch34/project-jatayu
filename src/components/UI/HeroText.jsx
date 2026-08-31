@@ -2,7 +2,7 @@ import React from 'react';
 import { ArrowDown, Compass } from 'lucide-react';
 
 /**
- * HeroText Component — Center/Left editorial text layout & dual CTAs (Awareness & Trek)
+ * HeroText Component — Center/Left editorial text layout & dual CTAs
  */
 export default function HeroText({ onBeginClick }) {
   const handleTrekClick = (e) => {
@@ -25,9 +25,9 @@ export default function HeroText({ onBeginClick }) {
       </h1>
 
       <div className="hero-subgroup">
-        <div className="hero-category">Vulture Awareness & Conservation</div>
+        <div className="hero-category">Celebrate International Vulture Awareness Day 2026</div>
         <p className="hero-description">
-          &ldquo;Discover the species that quietly keeps our ecosystems alive.&rdquo;
+          International Vulture Awareness Day reminds us of the vital role vultures play in keeping our ecosystems healthy. Project Jatayu 3.0 takes that awareness beyond the screen &mdash; inviting you to observe, learn and experience these remarkable birds at Ramadevara Betta &mdash; India&apos;s First Vulture Sanctuary on September 6.
         </p>
       </div>
 
@@ -39,7 +39,7 @@ export default function HeroText({ onBeginClick }) {
 
         <a href="#the-trek" className="hero-trek-link" onClick={handleTrekClick}>
           <Compass size={16} />
-          <span>JOIN THE TREK &rarr;</span>
+          <span>REGISTER FOR THE JATAYU OBSERVATION TREK &rarr;</span>
         </a>
       </div>
     </div>

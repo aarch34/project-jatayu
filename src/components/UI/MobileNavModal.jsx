@@ -8,11 +8,11 @@ export default function MobileNavModal({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   const navItems = [
-    { label: 'Meet Jatayu', href: '#meet-the-vulture', icon: Feather },
-    { label: 'Why They Matter', href: '#why-matters', icon: Shield },
-    { label: 'Threats', href: '#silent-decline', icon: Activity },
-    { label: 'Conservation', href: '#way-back', icon: Users },
-    { label: 'The Jatayu Trek', href: '#the-trek', icon: Compass, highlight: true },
+    { label: 'EXPLORE', href: '#meet-the-vulture', icon: Feather },
+    { label: 'WHY THEY MATTER', href: '#why-matters', icon: Shield },
+    { label: 'THREATS', href: '#silent-decline', icon: Activity },
+    { label: 'CONSERVATION', href: '#way-back', icon: Users },
+    { label: 'OBSERVATION TREK', href: '#the-trek', icon: Compass, highlight: true },
   ];
 
   const handleNavClick = (href) => {
@@ -22,6 +22,11 @@ export default function MobileNavModal({ isOpen, onClose }) {
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' });
     }
+  };
+
+  const handleRegisterClick = () => {
+    onClose();
+    window.open('https://forms.gle/uwx9YqtKBdHVku8J7', '_blank');
   };
 
   return (
@@ -60,9 +65,9 @@ export default function MobileNavModal({ isOpen, onClose }) {
           <button
             type="button"
             className="modal-trek-btn"
-            onClick={() => handleNavClick('#the-trek')}
+            onClick={handleRegisterClick}
           >
-            <span>REGISTER FOR THE TREK &rarr;</span>
+            <span>REGISTER FOR THE JATAYU OBSERVATION TREK &rarr;</span>
           </button>
         </div>
       </div>

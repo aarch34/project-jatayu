@@ -1,9 +1,9 @@
 import React from 'react';
-import { Calendar, MapPin, Clock, ExternalLink } from 'lucide-react';
+import { Calendar, MapPin, Clock, ExternalLink, Sun } from 'lucide-react';
 
 /**
- * YouCanHelpSection Component — Simple & Polished 3-Column Footer
- * Project Jatayu 3.0 · Rotaract Club of Swarna Bengaluru
+ * YouCanHelpSection Component — Simple & Polished 3-Column Footer with Accurate Date Distinction
+ * Project Jatayu 3.0 · Rotaract Club of Swarna Bengaluru & Rotaract District 3192
  */
 export default function YouCanHelpSection() {
   return (
@@ -28,7 +28,7 @@ export default function YouCanHelpSection() {
               <li><a href="#why-matters">Why They Matter</a></li>
               <li><a href="#silent-decline">Threats</a></li>
               <li><a href="#way-back">Conservation</a></li>
-              <li><a href="#the-trek">The Jatayu Trek</a></li>
+              <li><a href="#the-trek">Observation Trek</a></li>
             </ul>
           </div>
 
@@ -42,25 +42,34 @@ export default function YouCanHelpSection() {
               rel="noopener noreferrer"
               className="footer-register-link"
             >
-              <span>Register for the Jatayu Trek</span>
+              <span>Register for Jatayu Observation Trek</span>
               <ExternalLink size={14} />
             </a>
 
             <div className="footer-event-details">
-              <span className="event-name">International Vulture Awareness Day 2026</span>
-              <div className="event-meta-item">
-                <Calendar size={14} className="meta-icon" />
-                <span>September 6, 2026</span>
+              <div className="footer-date-block">
+                <span className="event-name-gold">
+                  <Sun size={13} className="inline-icon" /> International Vulture Awareness Day
+                </span>
+                <span className="event-date-sub">September 5, 2026</span>
               </div>
-              <div className="event-meta-item">
-                <Clock size={14} className="meta-icon" />
-                <span>8:00 AM &ndash; 2:00 PM</span>
+
+              <div className="footer-date-block">
+                <span className="event-name">Project Jatayu 3.0 Observation Trek</span>
+                <div className="event-meta-item">
+                  <Calendar size={14} className="meta-icon" />
+                  <span>September 6, 2026 (Sunday)</span>
+                </div>
+                <div className="event-meta-item">
+                  <Clock size={14} className="meta-icon" />
+                  <span>8:00 AM &ndash; 2:00 PM</span>
+                </div>
+                <div className="event-meta-item">
+                  <MapPin size={14} className="meta-icon" />
+                  <span>Ramadevara Betta, Ramanagara</span>
+                </div>
+                <span className="sanctuary-tag">India&apos;s First Vulture Sanctuary</span>
               </div>
-              <div className="event-meta-item">
-                <MapPin size={14} className="meta-icon" />
-                <span>Ramadevara Betta, Ramanagara</span>
-              </div>
-              <span className="sanctuary-tag">India&apos;s First Vulture Sanctuary</span>
             </div>
           </div>
         </div>

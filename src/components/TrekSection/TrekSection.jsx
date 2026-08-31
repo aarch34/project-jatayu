@@ -43,7 +43,7 @@ export default function TrekSection() {
         <div className="event-header-banner">
           <div className="event-badge-tag">
             <Compass size={16} />
-            <span>INTERNATIONAL VULTURE AWARENESS DAY 2026</span>
+            <span>PROJECT JATAYU 3.0 &bull; VULTURE OBSERVATION &amp; AWARENESS TREK</span>
           </div>
 
           <h2 className="event-main-heading">
@@ -51,11 +51,11 @@ export default function TrekSection() {
           </h2>
 
           <p className="event-sub-headline">
-            Join us on International Vulture Awareness Day 2026.
+            In Celebration of International Vulture Awareness Day 2026
           </p>
 
           <p className="event-description-text">
-            Be a part of Project Jatayu 3.0, a project dedicated to creating awareness, encouraging conservation, and celebrating the vital role of vultures in maintaining our ecosystem.
+            Be a part of Project Jatayu 3.0, a project dedicated to creating awareness, encouraging conservation, and celebrating the vital role of vultures in maintaining our ecosystem. Step into their habitat on September 6 for a Vulture Observation &amp; Awareness Trek at Ramadevara Betta &mdash; India&apos;s First Vulture Sanctuary.
           </p>
         </div>
 
@@ -371,7 +371,7 @@ export default function TrekSection() {
             READY TO MEET THE CLEANERS OF THE SKIES?
           </h3>
           <p className="final-cta-subheading">
-            Join us at Ramadevara Betta on September 6, 2026.
+            Celebrate Awareness Day. Experience conservation in the field at Ramadevara Betta on September 6, 2026.
           </p>
 
           <div className="final-cta-buttons-row">
@@ -381,7 +381,7 @@ export default function TrekSection() {
               rel="noopener noreferrer"
               className="final-cta-register-btn"
             >
-              <span>REGISTER FOR PROJECT JATAYU 3.0</span>
+              <span>REGISTER FOR THE JATAYU OBSERVATION TREK &rarr;</span>
               <ArrowRight size={18} />
             </a>
 
