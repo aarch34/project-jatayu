@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Compass, Shield, Feather, Activity, Users } from 'lucide-react';
+import { X, Compass, Shield, Feather, Activity, Users, Trophy } from 'lucide-react';
 
 /**
  * MobileNavModal Component — Full navigation menu for Project Jatayu 3.0
@@ -12,6 +12,7 @@ export default function MobileNavModal({ isOpen, onClose }) {
     { label: 'WHY THEY MATTER', href: '#why-matters', icon: Shield },
     { label: 'THREATS', href: '#silent-decline', icon: Activity },
     { label: 'CONSERVATION', href: '#way-back', icon: Users },
+    { label: 'THE CHALLENGE', href: '#vulture-challenge', icon: Trophy },
     { label: 'OBSERVATION TREK', href: '#the-trek', icon: Compass, highlight: true },
   ];
 

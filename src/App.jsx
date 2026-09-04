@@ -8,6 +8,7 @@ import VultureSection from './components/VultureSection/VultureSection';
 import WhyMattersSection from './components/WhyMattersSection/WhyMattersSection';
 import SilentDeclineSection from './components/SilentDeclineSection/SilentDeclineSection';
 import WayBackSection from './components/WayBackSection/WayBackSection';
+import VultureChallengeSection from './components/VultureChallengeSection/VultureChallengeSection';
 import TrekSection from './components/TrekSection/TrekSection';
 import YouCanHelpSection from './components/YouCanHelpSection/YouCanHelpSection';
 import { useScrollAnimation } from './hooks/useScrollAnimation';
@@ -72,7 +73,10 @@ export default function App() {
       {/* Step 5: The Way Back Section (Interactive Conservation Journey) */}
       <WayBackSection />
 
-      {/* Step 6: The Jatayu Trek ("SEE THE STORY BEYOND THE SCREEN") */}
+      {/* Step 6: The Vulture Challenge (Interactive Conservation Quiz & Leaderboard) */}
+      <VultureChallengeSection />
+
+      {/* Step 7: The Jatayu Trek ("SEE THE STORY BEYOND THE SCREEN") */}
       <TrekSection />
 
       {/* Step 7: You Can Help & Final Conclusion Section ("KEEP JATAYU IN THE SKY") */}
