@@ -1,10 +1,18 @@
 /**
  * PROJECT JATAYU 3.0 — PERSISTENT GLOBAL LEADERBOARD STORE
- * Shared API sync, BroadcastChannel real-time tab updates, and 3-tier tie-breaking.
+ * Pure Server API sync (/api/leaderboard), BroadcastChannel real-time tab updates, and 3-tier tie-breaking.
+ * NO client-side localStorage state for global leaderboard records.
  */
 
-const STORAGE_KEY = 'jatayu_vulture_challenge_leaderboard_v1';
+const LEGACY_STORAGE_KEY = 'jatayu_vulture_challenge_leaderboard_v1';
 const BROADCAST_CHANNEL_NAME = 'jatayu_leaderboard_channel';
+
+// Purge legacy local storage leaderboard items on startup
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch (e) {}
+}
 
 let broadcastChannel = null;
 if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
@@ -59,51 +67,26 @@ export function sortLeaderboardEntries(entries = []) {
 }
 
 /**
- * Loads leaderboard entries from backend API (/api/leaderboard) or fallback localStorage.
+ * Loads leaderboard entries directly from shared backend API (/api/leaderboard).
  */
 export async function fetchLeaderboardEntries() {
   try {
-    const res = await fetch('/api/leaderboard');
+    const res = await fetch('/api/leaderboard', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
     if (res.ok) {
       const data = await res.json();
-      const sorted = sortLeaderboardEntries(data);
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
-      } catch (e) {}
-      return sorted;
+      return sortLeaderboardEntries(data);
     }
   } catch (err) {
-    // API not reachable or static host fallback
+    console.error('Error fetching global leaderboard API:', err);
   }
-
-  // Fallback to localStorage
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return sortLeaderboardEntries(parsed);
-    }
-  } catch (e) {}
-
   return [];
 }
 
 /**
- * Synchronous getter returning local cached entries.
- */
-export function getLeaderboardEntries() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return sortLeaderboardEntries(parsed);
-    }
-  } catch (e) {}
-  return [];
-}
-
-/**
- * Saves a completed attempt to backend API and updates local store.
+ * Saves a completed attempt to shared backend API (/api/leaderboard).
  */
 export async function saveLeaderboardEntry(attemptRecord) {
   const normalized = {
@@ -122,44 +105,31 @@ export async function saveLeaderboardEntry(attemptRecord) {
     completedAt: attemptRecord.completedAt || new Date().toISOString(),
   };
 
-  let updatedList = [];
-
   try {
     const res = await fetch('/api/leaderboard', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(normalized),
     });
     if (res.ok) {
-      updatedList = await res.json();
+      const updatedList = await res.json();
+      const sorted = sortLeaderboardEntries(updatedList);
+
+      // Broadcast to other open tabs
+      if (broadcastChannel) {
+        try {
+          broadcastChannel.postMessage({ type: 'LEADERBOARD_UPDATED', data: sorted });
+        } catch (e) {}
+      }
+
+      return sorted;
     }
   } catch (err) {
-    // API offline fallback
+    console.error('Error saving leaderboard entry to API:', err);
   }
 
-  if (updatedList.length === 0) {
-    const current = getLeaderboardEntries();
-    const exists = current.some((item) => item.attemptId === normalized.attemptId);
-    if (!exists) {
-      current.push(normalized);
-    }
-    updatedList = sortLeaderboardEntries(current);
-  } else {
-    updatedList = sortLeaderboardEntries(updatedList);
-  }
-
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
-  } catch (e) {}
-
-  // Broadcast to other open tabs
-  if (broadcastChannel) {
-    try {
-      broadcastChannel.postMessage({ type: 'LEADERBOARD_UPDATED', data: updatedList });
-    } catch (e) {}
-  }
-
-  return updatedList;
+  // Refetch server state
+  return await fetchLeaderboardEntries();
 }
 
 /**
@@ -186,7 +156,6 @@ export function getParticipantRank(allEntries, targetAttemptId, currentAttemptDa
       const prevTime = prev.totalTimeSeconds !== undefined ? prev.totalTimeSeconds : (prev.timeTakenSeconds || 0);
       const currTime = curr.totalTimeSeconds !== undefined ? curr.totalTimeSeconds : (curr.timeTakenSeconds || 0);
 
-      // If NOT identical in correct, score, AND time, rank increases to current index + 1
       if (currCorrect !== prevCorrect || currScore !== prevScore || currTime !== prevTime) {
         currentRank = i + 1;
       }

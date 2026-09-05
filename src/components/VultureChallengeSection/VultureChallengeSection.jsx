@@ -18,7 +18,6 @@ import { QUIZ_LEVELS } from './quizData';
 import { createQuizSession, evaluateQuizSession } from './quizValidator';
 import {
   fetchLeaderboardEntries,
-  getLeaderboardEntries,
   saveLeaderboardEntry,
   filterLeaderboard,
   formatTime,
@@ -62,7 +61,7 @@ export default function VultureChallengeSection() {
   const [lbFilterTab, setLbFilterTab] = useState('ALL');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Fetch initial global leaderboard and subscribe to real-time updates
+  // Fetch initial global leaderboard from server API and subscribe to real-time tab updates
   useEffect(() => {
     const loadEntries = async () => {
       const data = await fetchLeaderboardEntries();
@@ -79,13 +78,29 @@ export default function VultureChallengeSection() {
     };
   }, []);
 
-  // Refresh leaderboard whenever viewing leaderboard screen
+  // Continuous auto-polling (every 4s) and window focus refetch for cross-device real-time sync
   useEffect(() => {
-    if (viewState === 'leaderboard') {
-      fetchLeaderboardEntries().then((data) => {
-        setLeaderboardEntries(data);
-      });
+    let pollInterval = null;
+
+    const refreshServerData = async () => {
+      const data = await fetchLeaderboardEntries();
+      setLeaderboardEntries(data);
+    };
+
+    if (viewState === 'leaderboard' || viewState === 'intro') {
+      refreshServerData();
+      pollInterval = setInterval(refreshServerData, 4000);
     }
+
+    const handleFocus = () => {
+      refreshServerData();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [viewState]);
 
   // Current level questions subset
@@ -108,7 +123,6 @@ export default function VultureChallengeSection() {
     if (timerRef.current) clearInterval(timerRef.current);
 
     timerRef.current = setInterval(() => {
-      // Accumulate time spent
       setTotalTimeSpentSeconds((prev) => prev + 1);
 
       setTimeLeft((prev) => {
@@ -133,7 +147,7 @@ export default function VultureChallengeSection() {
 
     const newAnswers = {
       ...userAnswers,
-      [currentQuestion.id]: null, // Unanswered due to timer expiry
+      [currentQuestion.id]: null,
     };
     setUserAnswers(newAnswers);
 
@@ -186,19 +200,16 @@ export default function VultureChallengeSection() {
   const handleOptionSelect = (optionIndex) => {
     if (isQuestionLocked || selectedOptionForCurrent !== null) return;
 
-    // Stop timer immediately and lock question
     if (timerRef.current) clearInterval(timerRef.current);
     setIsQuestionLocked(true);
     setSelectedOptionForCurrent(optionIndex);
 
-    // Save answer
     const newAnswers = {
       ...userAnswers,
       [currentQuestion.id]: optionIndex,
     };
     setUserAnswers(newAnswers);
 
-    // Check if correct to update subtle live score counter
     const isCorrect = optionIndex === currentQuestion._correctShuffledIndex;
     if (isCorrect) {
       const levelObj = QUIZ_LEVELS.find((l) => l.id === currentLevelId);
@@ -206,7 +217,6 @@ export default function VultureChallengeSection() {
       setLiveScore((prev) => prev + points);
     }
 
-    // Auto-advance to next question after brief 400ms feedback pause
     setTimeout(() => {
       advanceQuestionFlow(newAnswers);
     }, 400);
@@ -220,14 +230,12 @@ export default function VultureChallengeSection() {
     if (currentQuestionIndexInLevel < currentLevelQuestions.length - 1) {
       setCurrentQuestionIndexInLevel((prev) => prev + 1);
     } else {
-      // Round Completed!
       const completedLevelObj = QUIZ_LEVELS.find((l) => l.id === currentLevelId);
       setCompletedLevelInfo(completedLevelObj);
 
       if (currentLevelId < 3) {
         setViewState('level-unlock');
       } else {
-        // All 3 rounds complete! Finish and evaluate quiz
         finishQuiz(latestAnswers);
       }
     }
@@ -267,7 +275,7 @@ export default function VultureChallengeSection() {
       completedAt: evalResults.completedAt,
     };
 
-    // Save to disk-persisted global API endpoint
+    // Save to disk-persisted shared global API endpoint
     const updatedGlobalEntries = await saveLeaderboardEntry(submissionData);
     setLeaderboardEntries(updatedGlobalEntries);
 
@@ -283,10 +291,9 @@ export default function VultureChallengeSection() {
     setIsSubmitting(false);
   };
 
-  const handleOpenLeaderboard = () => {
-    fetchLeaderboardEntries().then((data) => {
-      setLeaderboardEntries(data);
-    });
+  const handleOpenLeaderboard = async () => {
+    const data = await fetchLeaderboardEntries();
+    setLeaderboardEntries(data);
     setViewState('leaderboard');
   };
 
@@ -300,7 +307,6 @@ export default function VultureChallengeSection() {
     rotaractClub || 'Participant'
   );
 
-  // Compute timer urgency (when <= 5s)
   const isTimerUrgent = timeLeft <= 5 && viewState === 'play';
   const globalQuestionNumber = (currentLevelId - 1) * 5 + (currentQuestionIndexInLevel + 1);
   const maxQuestionTime = currentQuestion ? (currentQuestion.timeLimitSeconds || 20) : 20;
@@ -723,8 +729,7 @@ export default function VultureChallengeSection() {
                       const rankNum = index + 1;
                       const rankClass = rankNum <= 3 ? `rank-${rankNum}` : '';
                       const isCurrentUser =
-                        (activeAttemptId && item.attemptId === activeAttemptId) ||
-                        (playerName && item.name.trim().toLowerCase() === playerName.trim().toLowerCase());
+                        activeAttemptId && item.attemptId === activeAttemptId;
 
                       const correctVal = item.correctAnswers !== undefined ? item.correctAnswers : (item.totalCorrect || 0);
                       const totalQ = item.totalQuestions || 15;
@@ -765,8 +770,7 @@ export default function VultureChallengeSection() {
                 activeFilteredLeaderboard.map((item, index) => {
                   const rankNum = index + 1;
                   const isCurrentUser =
-                    (activeAttemptId && item.attemptId === activeAttemptId) ||
-                    (playerName && item.name.trim().toLowerCase() === playerName.trim().toLowerCase());
+                    activeAttemptId && item.attemptId === activeAttemptId;
 
                   const correctVal = item.correctAnswers !== undefined ? item.correctAnswers : (item.totalCorrect || 0);
                   const scoreVal = item.totalScore !== undefined ? item.totalScore : (item.score || 0);

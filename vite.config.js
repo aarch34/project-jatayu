@@ -62,10 +62,20 @@ function leaderboardApiPlugin() {
         const url = req.url ? req.url.split('?')[0] : '';
 
         if (url === '/api/leaderboard') {
+          // Set CORS Headers for cross-device access over LAN / IP
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+          if (req.method === 'OPTIONS') {
+            res.statusCode = 204;
+            res.end();
+            return;
+          }
+
           // Public READ endpoint - open to everyone
           if (req.method === 'GET') {
             const data = readData();
-            res.setHeader('Content-Type', 'application/json');
             res.statusCode = 200;
             res.end(JSON.stringify(data));
             return;
@@ -95,7 +105,6 @@ function leaderboardApiPlugin() {
                   !submission.attemptId
                 ) {
                   res.statusCode = 400;
-                  res.setHeader('Content-Type', 'application/json');
                   res.end(JSON.stringify({ error: 'Invalid or tampered quiz submission payload' }));
                   return;
                 }
@@ -112,12 +121,10 @@ function leaderboardApiPlugin() {
                   updated = writeData([...currentData, submission]);
                 }
 
-                res.setHeader('Content-Type', 'application/json');
                 res.statusCode = 200;
                 res.end(JSON.stringify(updated));
               } catch (err) {
                 res.statusCode = 400;
-                res.setHeader('Content-Type', 'application/json');
                 res.end(JSON.stringify({ error: 'Malformed JSON payload' }));
               }
             });
@@ -131,5 +138,9 @@ function leaderboardApiPlugin() {
 }
 
 export default defineConfig({
+  server: {
+    host: true, // Listens on 0.0.0.0 for cross-device LAN access
+    cors: true,
+  },
   plugins: [react(), leaderboardApiPlugin()],
 });
