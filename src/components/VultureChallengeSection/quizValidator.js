@@ -1,6 +1,6 @@
 /**
  * PROJECT JATAYU 3.0 — QUIZ VALIDATOR & ANTI-CHEATING ENGINE
- * Randomizes questions & options while ensuring server-style verification.
+ * Handles Fisher-Yates randomisation, server-style score verification, and exact stats calculations.
  */
 import { RAW_QUESTIONS, QUIZ_LEVELS } from './quizData';
 
@@ -17,14 +17,14 @@ function shuffleArray(arr) {
 }
 
 /**
- * Initializes a randomized quiz session for a user.
- * Shuffles question order per level and shuffles option order for each question.
- * Stores a secure internal mapping for verification.
+ * Initializes a randomized quiz session for a participant.
+ * Shuffles question order per round and option order per question.
  */
 export function createQuizSession() {
   const sessionQuestions = [];
+  const sessionId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
-  // Process level by level (5 questions per level)
+  // Process level by level (5 questions per round)
   QUIZ_LEVELS.forEach((levelObj) => {
     const levelRawQuestions = RAW_QUESTIONS.filter((q) => q.level === levelObj.id);
     const shuffledLevelQuestions = shuffleArray(levelRawQuestions);
@@ -43,7 +43,7 @@ export function createQuizSession() {
         level: q.level,
         question: q.question,
         options: shuffledOptions.map((o) => o.text), // Array of option strings in shuffled order
-        // Hidden mapping to verify answer without exposing answer key directly
+        timeLimitSeconds: levelObj.timeLimitSeconds || 20,
         _correctShuffledIndex: shuffledOptions.findIndex((o) => o.originalIndex === q.correctIndex),
         _originalQuestionId: q.id,
       });
@@ -51,53 +51,62 @@ export function createQuizSession() {
   });
 
   return {
-    sessionId: `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    sessionId,
     startTime: Date.now(),
     questions: sessionQuestions,
   };
 }
 
 /**
- * Calculates achievement title based purely on objective score.
+ * Calculates performance title based purely on objective score out of 300.
  */
 export function getAchievementBadge(score) {
-  if (score >= 250) {
+  if (score >= 280) {
     return {
       title: 'GUARDIAN OF THE SKIES',
-      description: 'Mastery level! You hold deep conservation knowledge of Jatayu.',
+      description: 'Mastery score! You demonstrate elite conservation science knowledge.',
+      badgeClass: 'badge-skies',
+    };
+  } else if (score >= 240) {
+    return {
+      title: 'VULTURE GUARDIAN',
+      description: 'Exceptional competitive score! You have deep mastery of vulture protection.',
       badgeClass: 'badge-guardian',
     };
-  } else if (score >= 200) {
+  } else if (score >= 180) {
     return {
       title: 'CONSERVATION CHAMPION',
-      description: 'Exceptional score! You are a champion for wildlife preservation.',
+      description: 'Strong result! You demonstrate solid command of ecological science.',
       badgeClass: 'badge-champion',
     };
   } else if (score >= 100) {
     return {
       title: 'VULTURE EXPLORER',
-      description: 'Great effort! You have built a strong understanding of vulture ecology.',
+      description: 'Good effort! You understand core ecological and threat concepts.',
       badgeClass: 'badge-explorer',
     };
   } else {
     return {
       title: 'CURIOUS OBSERVER',
-      description: 'A solid start to your conservation learning journey.',
+      description: 'A starting step into the world of avian conservation science.',
       badgeClass: 'badge-curious',
     };
   }
 }
 
 /**
- * Validates user answers server-style and calculates score breakdown.
+ * Validates user answers server-style and calculates complete statistical metrics.
  * @param {Object} session - The active quiz session created by createQuizSession()
- * @param {Object} userAnswers - Map of questionId => selectedShuffledIndex (0-3)
+ * @param {Object} userAnswers - Map of questionId => selectedShuffledIndex (0-3 or null if timed out)
+ * @param {number} totalTimeTakenSeconds - Actual accumulated seconds spent across all questions
  * @param {number} endTime - Timestamp when user finished quiz
  */
-export function evaluateQuizSession(session, userAnswers, endTime = Date.now()) {
+export function evaluateQuizSession(session, userAnswers, totalTimeTakenSeconds = 0, endTime = Date.now()) {
   let totalScore = 0;
-  let totalCorrect = 0;
-  
+  let correctAnswers = 0;
+  let incorrectAnswers = 0;
+  let unansweredQuestions = 0;
+
   const levelBreakdown = {
     1: { correct: 0, total: 5, pointsEarned: 0 },
     2: { correct: 0, total: 5, pointsEarned: 0 },
@@ -106,30 +115,43 @@ export function evaluateQuizSession(session, userAnswers, endTime = Date.now()) 
 
   session.questions.forEach((q) => {
     const selectedIdx = userAnswers[q.id];
-    const isCorrect = selectedIdx !== undefined && selectedIdx === q._correctShuffledIndex;
+    if (selectedIdx === null || selectedIdx === undefined) {
+      unansweredQuestions += 1;
+      return;
+    }
 
+    const isCorrect = selectedIdx === q._correctShuffledIndex;
     const levelInfo = QUIZ_LEVELS.find((l) => l.id === q.level);
     const points = isCorrect ? (levelInfo ? levelInfo.pointsPerQuestion : 10) : 0;
 
     if (isCorrect) {
       totalScore += points;
-      totalCorrect += 1;
+      correctAnswers += 1;
       if (levelBreakdown[q.level]) {
         levelBreakdown[q.level].correct += 1;
         levelBreakdown[q.level].pointsEarned += points;
       }
+    } else {
+      incorrectAnswers += 1;
     }
   });
 
-  const timeTakenSeconds = Math.max(1, Math.round((endTime - session.startTime) / 1000));
+  const finalTimeSeconds = totalTimeTakenSeconds > 0
+    ? totalTimeTakenSeconds
+    : Math.max(1, Math.round((endTime - session.startTime) / 1000));
+
   const achievement = getAchievementBadge(totalScore);
 
   return {
+    attemptId: session.sessionId,
     totalScore, // Max 300
     totalQuestions: session.questions.length, // 15
-    totalCorrect,
+    correctAnswers,
+    incorrectAnswers,
+    unansweredQuestions,
     levelBreakdown,
-    timeTakenSeconds,
+    totalTimeSeconds: finalTimeSeconds,
+    timeTakenSeconds: finalTimeSeconds,
     achievement,
     completedAt: new Date(endTime).toISOString(),
   };

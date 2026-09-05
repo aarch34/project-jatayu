@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Trophy,
   Shield,
@@ -11,13 +11,19 @@ import {
   RotateCcw,
   Sparkles,
   CheckCircle,
+  Clock,
+  Zap,
 } from 'lucide-react';
 import { QUIZ_LEVELS } from './quizData';
 import { createQuizSession, evaluateQuizSession } from './quizValidator';
 import {
+  fetchLeaderboardEntries,
   getLeaderboardEntries,
   saveLeaderboardEntry,
   filterLeaderboard,
+  formatTime,
+  getParticipantRank,
+  subscribeLeaderboardUpdates,
 } from './leaderboardStore';
 import './VultureChallengeSection.css';
 
@@ -39,18 +45,102 @@ export default function VultureChallengeSection() {
   const [selectedOptionForCurrent, setSelectedOptionForCurrent] = useState(null);
   const [completedLevelInfo, setCompletedLevelInfo] = useState(null);
 
+  // Question Timer & Accumulated Time Tracking
+  const [timeLeft, setTimeLeft] = useState(20);
+  const [totalTimeSpentSeconds, setTotalTimeSpentSeconds] = useState(0);
+  const [isQuestionLocked, setIsQuestionLocked] = useState(false);
+  const timerRef = useRef(null);
+
   // Live running score display
   const [liveScore, setLiveScore] = useState(0);
 
-  // Quiz evaluation results & leaderboard
+  // Quiz evaluation results, attempt tracking & global leaderboard
   const [finalEvaluation, setFinalEvaluation] = useState(null);
+  const [activeAttemptId, setActiveAttemptId] = useState(null);
+  const [calculatedRank, setCalculatedRank] = useState(null);
   const [leaderboardEntries, setLeaderboardEntries] = useState([]);
   const [lbFilterTab, setLbFilterTab] = useState('ALL');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Fetch initial global leaderboard and subscribe to real-time updates
   useEffect(() => {
-    // Load initial leaderboard
-    setLeaderboardEntries(getLeaderboardEntries());
+    const loadEntries = async () => {
+      const data = await fetchLeaderboardEntries();
+      setLeaderboardEntries(data);
+    };
+    loadEntries();
+
+    const unsubscribe = subscribeLeaderboardUpdates((updatedData) => {
+      setLeaderboardEntries(updatedData);
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
+
+  // Refresh leaderboard whenever viewing leaderboard screen
+  useEffect(() => {
+    if (viewState === 'leaderboard') {
+      fetchLeaderboardEntries().then((data) => {
+        setLeaderboardEntries(data);
+      });
+    }
+  }, [viewState]);
+
+  // Current level questions subset
+  const currentLevelQuestions = session
+    ? session.questions.filter((q) => q.level === currentLevelId)
+    : [];
+  const currentQuestion = currentLevelQuestions[currentQuestionIndexInLevel];
+
+  // Handle per-question countdown timer interval and time accumulation
+  useEffect(() => {
+    if (viewState !== 'play' || !currentQuestion || isQuestionLocked) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
+    }
+
+    const questionTimeLimit = currentQuestion.timeLimitSeconds || 20;
+    setTimeLeft(questionTimeLimit);
+    setIsQuestionLocked(false);
+
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    timerRef.current = setInterval(() => {
+      // Accumulate time spent
+      setTotalTimeSpentSeconds((prev) => prev + 1);
+
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          handleTimerExpiry();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [viewState, currentLevelId, currentQuestionIndexInLevel, session]);
+
+  // Handle automatic timer expiry (0 points, record unanswered, auto-advance)
+  const handleTimerExpiry = () => {
+    setIsQuestionLocked(true);
+    if (!currentQuestion) return;
+
+    const newAnswers = {
+      ...userAnswers,
+      [currentQuestion.id]: null, // Unanswered due to timer expiry
+    };
+    setUserAnswers(newAnswers);
+
+    setTimeout(() => {
+      advanceQuestionFlow(newAnswers);
+    }, 800);
+  };
 
   // Update club field when non-Rotaractor checkbox toggles
   const handleCheckboxChange = (e) => {
@@ -72,104 +162,131 @@ export default function VultureChallengeSection() {
   const handleRegisterSubmit = (e) => {
     e.preventDefault();
     if (!playerName.trim()) {
-      setNameError('Please enter your full name to start the challenge.');
+      setNameError('Please enter your full name to start the competition.');
       return;
     }
     setNameError('');
 
-    // Create session with randomized questions and option orders
+    // Create new session with unique attemptId
     const newSession = createQuizSession();
     setSession(newSession);
+    setActiveAttemptId(newSession.sessionId);
     setCurrentLevelId(1);
     setCurrentQuestionIndexInLevel(0);
     setUserAnswers({});
     setSelectedOptionForCurrent(null);
+    setIsQuestionLocked(false);
+    setTotalTimeSpentSeconds(0);
     setLiveScore(0);
+    setIsSubmitting(false);
     setViewState('play');
   };
 
-  // Current level questions subset
-  const currentLevelQuestions = session
-    ? session.questions.filter((q) => q.level === currentLevelId)
-    : [];
-  const currentQuestion = currentLevelQuestions[currentQuestionIndexInLevel];
-
-  // Option selection
+  // Participant option selection
   const handleOptionSelect = (optionIndex) => {
-    setSelectedOptionForCurrent(optionIndex);
-  };
+    if (isQuestionLocked || selectedOptionForCurrent !== null) return;
 
-  // Move to next question or complete level
-  const handleNextQuestion = () => {
-    if (selectedOptionForCurrent === null || !currentQuestion) return;
+    // Stop timer immediately and lock question
+    if (timerRef.current) clearInterval(timerRef.current);
+    setIsQuestionLocked(true);
+    setSelectedOptionForCurrent(optionIndex);
 
     // Save answer
     const newAnswers = {
       ...userAnswers,
-      [currentQuestion.id]: selectedOptionForCurrent,
+      [currentQuestion.id]: optionIndex,
     };
     setUserAnswers(newAnswers);
 
-    // Check if correct live to update subtle score counter
-    const isCorrect = selectedOptionForCurrent === currentQuestion._correctShuffledIndex;
+    // Check if correct to update subtle live score counter
+    const isCorrect = optionIndex === currentQuestion._correctShuffledIndex;
     if (isCorrect) {
       const levelObj = QUIZ_LEVELS.find((l) => l.id === currentLevelId);
       const points = levelObj ? levelObj.pointsPerQuestion : 10;
       setLiveScore((prev) => prev + points);
     }
 
-    // Reset selected option state for next question
-    setSelectedOptionForCurrent(null);
+    // Auto-advance to next question after brief 400ms feedback pause
+    setTimeout(() => {
+      advanceQuestionFlow(newAnswers);
+    }, 400);
+  };
 
-    // Check if there are more questions in this level
+  // Advance question or trigger round completion
+  const advanceQuestionFlow = (latestAnswers) => {
+    setSelectedOptionForCurrent(null);
+    setIsQuestionLocked(false);
+
     if (currentQuestionIndexInLevel < currentLevelQuestions.length - 1) {
       setCurrentQuestionIndexInLevel((prev) => prev + 1);
     } else {
-      // Level Completed!
+      // Round Completed!
       const completedLevelObj = QUIZ_LEVELS.find((l) => l.id === currentLevelId);
       setCompletedLevelInfo(completedLevelObj);
 
       if (currentLevelId < 3) {
         setViewState('level-unlock');
       } else {
-        // All 3 levels complete! Evaluate session
-        finishQuiz(newAnswers);
+        // All 3 rounds complete! Finish and evaluate quiz
+        finishQuiz(latestAnswers);
       }
     }
   };
 
-  // Unlock and start next level
+  // Unlock and start next round
   const handleProceedToNextLevel = () => {
     const nextLevelId = currentLevelId + 1;
     setCurrentLevelId(nextLevelId);
     setCurrentQuestionIndexInLevel(0);
     setSelectedOptionForCurrent(null);
+    setIsQuestionLocked(false);
     setViewState('play');
   };
 
-  // Evaluate final quiz and save to persistent leaderboard
-  const finishQuiz = (finalAnswers) => {
-    const evalResults = evaluateQuizSession(session, finalAnswers);
+  // Evaluate final quiz, store exact stats, and save to global persistent API
+  const finishQuiz = async (finalAnswers) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
+    const evalResults = evaluateQuizSession(session, finalAnswers, totalTimeSpentSeconds);
     setFinalEvaluation(evalResults);
 
-    // Save to leaderboard
-    const updatedLb = saveLeaderboardEntry({
+    const submissionData = {
+      attemptId: session.sessionId,
       name: playerName,
       club: isNotRotaractor ? 'Participant' : (rotaractClub || 'Participant'),
       isRotaractor: !isNotRotaractor,
+      correctAnswers: evalResults.correctAnswers,
+      totalQuestions: evalResults.totalQuestions, // 15
+      incorrectAnswers: evalResults.incorrectAnswers,
+      unansweredQuestions: evalResults.unansweredQuestions,
+      totalScore: evalResults.totalScore,
       score: evalResults.totalScore,
-      totalCorrect: evalResults.totalCorrect,
-      levelBreakdown: evalResults.levelBreakdown,
-      timeTakenSeconds: evalResults.timeTakenSeconds,
+      totalTimeSeconds: evalResults.totalTimeSeconds,
+      timeTakenSeconds: evalResults.totalTimeSeconds,
       completedAt: evalResults.completedAt,
-    });
+    };
 
-    setLeaderboardEntries(updatedLb);
+    // Save to disk-persisted global API endpoint
+    const updatedGlobalEntries = await saveLeaderboardEntry(submissionData);
+    setLeaderboardEntries(updatedGlobalEntries);
+
+    // Calculate live position rank
+    const playerRank = getParticipantRank(
+      updatedGlobalEntries,
+      session.sessionId,
+      submissionData
+    );
+    setCalculatedRank(playerRank);
+
     setViewState('results');
+    setIsSubmitting(false);
   };
 
   const handleOpenLeaderboard = () => {
-    setLeaderboardEntries(getLeaderboardEntries());
+    fetchLeaderboardEntries().then((data) => {
+      setLeaderboardEntries(data);
+    });
     setViewState('leaderboard');
   };
 
@@ -182,6 +299,12 @@ export default function VultureChallengeSection() {
     lbFilterTab,
     rotaractClub || 'Participant'
   );
+
+  // Compute timer urgency (when <= 5s)
+  const isTimerUrgent = timeLeft <= 5 && viewState === 'play';
+  const globalQuestionNumber = (currentLevelId - 1) * 5 + (currentQuestionIndexInLevel + 1);
+  const maxQuestionTime = currentQuestion ? (currentQuestion.timeLimitSeconds || 20) : 20;
+  const timeProgressPercent = Math.max(0, Math.min(100, (timeLeft / maxQuestionTime) * 100));
 
   return (
     <section id="vulture-challenge" className="quiz-section">
@@ -219,7 +342,7 @@ export default function VultureChallengeSection() {
           <div className="quiz-card quiz-intro-card">
             <div className="quiz-badge">
               <span className="dot"></span>
-              INTERNATIONAL VULTURE AWARENESS DAY CHALLENGE
+              COLLEGE COMPETITIVE CONSERVATION QUIZ
             </div>
 
             <h2 className="quiz-title">THE VULTURE CHALLENGE</h2>
@@ -229,16 +352,47 @@ export default function VultureChallengeSection() {
             </p>
 
             <p className="quiz-copy">
-              Test what you've learned about vultures, their essential role in our ecosystems, the severe threats they face, and how real-world conservation can help bring them back from the brink of extinction.
+              Test your scientific knowledge of vulture ecology, veterinary pharmacology, ecosystem disease cascades, and population recovery strategies across 3 timed competitive rounds.
             </p>
 
-            <button
-              type="button"
-              className="quiz-primary-btn"
-              onClick={handleStartIntro}
-            >
-              <span>TAKE THE CHALLENGE &rarr;</span>
-            </button>
+            {/* Round Preview Grid */}
+            <div className="round-preview-grid">
+              <div className="round-preview-item">
+                <span className="rp-tag">ROUND 01</span>
+                <span className="rp-title">VULTURE 101</span>
+                <span className="rp-detail">20s / Q • 10 Pts</span>
+              </div>
+              <div className="round-preview-item">
+                <span className="rp-tag">ROUND 02</span>
+                <span className="rp-title">THE ECOLOGIST</span>
+                <span className="rp-detail">25s / Q • 20 Pts</span>
+              </div>
+              <div className="round-preview-item">
+                <span className="rp-tag">ROUND 03</span>
+                <span className="rp-title">THE GUARDIAN</span>
+                <span className="rp-detail">30s / Q • 30 Pts</span>
+              </div>
+            </div>
+
+            {/* Intro Actions: Take Challenge or View Public Leaderboard */}
+            <div className="intro-action-row">
+              <button
+                type="button"
+                className="quiz-primary-btn"
+                onClick={handleStartIntro}
+              >
+                <span>TAKE THE CHALLENGE &rarr;</span>
+              </button>
+
+              <button
+                type="button"
+                className="quiz-secondary-btn"
+                onClick={handleOpenLeaderboard}
+              >
+                <Trophy size={16} />
+                <span>SEE WHO'S LEADING &rarr;</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -248,9 +402,9 @@ export default function VultureChallengeSection() {
         {viewState === 'register' && (
           <div className="quiz-card quiz-reg-card">
             <div className="quiz-reg-header">
-              <h3 className="quiz-reg-title">PLAYER REGISTRATION</h3>
+              <h3 className="quiz-reg-title">COMPETITOR REGISTRATION</h3>
               <p className="quiz-reg-desc">
-                Identify yourself on the leaderboard before taking the challenge.
+                Enter your details to register your competitive score and completion time on the global leaderboard.
               </p>
             </div>
 
@@ -303,32 +457,43 @@ export default function VultureChallengeSection() {
         )}
 
         {/* ===================================================================
-            3. QUIZ PLAY STATE
+            3. QUIZ PLAY STATE (ENFORCED TIMER & QUESTIONS)
             =================================================================== */}
         {viewState === 'play' && currentQuestion && (
           <div className="quiz-card quiz-play-card">
-            {/* Top Bar: Level Badge & Subtle Live Score */}
-            <div className="quiz-play-topbar">
-              <div className={`level-indicator-badge level-${currentLevelId}`}>
-                <Shield size={14} />
-                <span>
-                  LEVEL 0{currentLevelId}: {QUIZ_LEVELS[currentLevelId - 1].title} ({QUIZ_LEVELS[currentLevelId - 1].difficulty})
+            {/* Top Bar: Round Info, Global Question Counter & Countdown Timer */}
+            <div className="quiz-play-header">
+              <div className="round-info-group">
+                <div className="round-badge">
+                  <Shield size={14} />
+                  <span>
+                    {QUIZ_LEVELS[currentLevelId - 1].code} — {QUIZ_LEVELS[currentLevelId - 1].title}
+                  </span>
+                </div>
+                <div className="question-tracker">
+                  QUESTION {globalQuestionNumber < 10 ? `0${globalQuestionNumber}` : globalQuestionNumber} / 15
+                </div>
+              </div>
+
+              {/* Per-Question Digital Countdown Timer */}
+              <div className={`timer-container ${isTimerUrgent ? 'urgent' : ''}`}>
+                <Clock size={18} className="timer-icon" />
+                <span className="timer-digits">
+                  {timeLeft < 10 ? `0${timeLeft}` : timeLeft}s
                 </span>
               </div>
-
-              <div className="quiz-score-subtle">
-                <Trophy size={16} />
-                <span>SCORE {liveScore}</span>
-              </div>
             </div>
 
-            {/* Question Counter */}
-            <div className="question-counter">
-              QUESTION 0{currentQuestionIndexInLevel + 1} / 0{currentLevelQuestions.length}
+            {/* Timer Progress Fill Line */}
+            <div className="timer-progress-track">
+              <div
+                className={`timer-progress-fill ${isTimerUrgent ? 'urgent' : ''}`}
+                style={{ width: `${timeProgressPercent}%` }}
+              ></div>
             </div>
 
-            {/* Question Text */}
-            <h3 className="question-text">{currentQuestion.question}</h3>
+            {/* Scenario Question Text */}
+            <h3 className="scenario-question-text">{currentQuestion.question}</h3>
 
             {/* Answers Grid */}
             <div className="answers-grid">
@@ -341,6 +506,7 @@ export default function VultureChallengeSection() {
                     key={idx}
                     type="button"
                     className={`answer-option-btn ${isSelected ? 'selected' : ''}`}
+                    disabled={isQuestionLocked}
                     onClick={() => handleOptionSelect(idx)}
                   >
                     <span className="opt-prefix">{letter}</span>
@@ -350,16 +516,10 @@ export default function VultureChallengeSection() {
               })}
             </div>
 
-            {/* Action Bar */}
-            <div className="quiz-play-actions">
-              <button
-                type="button"
-                className="quiz-primary-btn"
-                disabled={selectedOptionForCurrent === null}
-                onClick={handleNextQuestion}
-              >
-                <span>NEXT &rarr;</span>
-              </button>
+            {/* Live Score Display Footer */}
+            <div className="quiz-score-display" style={{ justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+              <Trophy size={16} />
+              <span>SCORE: {liveScore}</span>
             </div>
           </div>
         )}
@@ -373,7 +533,7 @@ export default function VultureChallengeSection() {
               <CheckCircle size={36} />
             </div>
 
-            <h3 className="level-complete-title">LEVEL COMPLETE</h3>
+            <h3 className="level-complete-title">{completedLevelInfo.code} COMPLETE</h3>
 
             <p className="level-complete-msg">"{completedLevelInfo.unlockMessage}"</p>
 
@@ -383,23 +543,23 @@ export default function VultureChallengeSection() {
               onClick={handleProceedToNextLevel}
             >
               <span>
-                START LEVEL 0{currentLevelId + 1}: {QUIZ_LEVELS[currentLevelId].title} &rarr;
+                START {QUIZ_LEVELS[currentLevelId].code}: {QUIZ_LEVELS[currentLevelId].title} &rarr;
               </span>
             </button>
           </div>
         )}
 
         {/* ===================================================================
-            5. FINAL RESULTS STATE
+            5. FINAL RESULTS & LIVE RANK SCREEN
             =================================================================== */}
         {viewState === 'results' && finalEvaluation && (
           <div className="quiz-card quiz-results-card">
             <div className="results-top">
               <div className="quiz-badge">
                 <Sparkles size={14} />
-                <span>CHALLENGE COMPLETE</span>
+                <span>THE VULTURE GUARDIANS</span>
               </div>
-              <h2 className="results-title">YOU'VE COMPLETED THE VULTURE CHALLENGE.</h2>
+              <h2 className="results-title">YOUR RESULT</h2>
 
               <div className="player-info-pill">
                 <span className="name">{playerName}</span>
@@ -408,29 +568,34 @@ export default function VultureChallengeSection() {
               </div>
             </div>
 
-            {/* Objective Score & Stats */}
+            {/* Stats Grid: Correct Answers, Score, Time, and Global Rank */}
             <div className="results-stats-grid">
               <div className="stat-box">
-                <span className="stat-val">{finalEvaluation.totalScore}</span>
-                <span className="stat-lbl">TOTAL SCORE / 300</span>
-              </div>
-
-              <div className="stat-box">
                 <span className="stat-val">
-                  {finalEvaluation.totalCorrect} / {finalEvaluation.totalQuestions}
+                  {finalEvaluation.correctAnswers} / {finalEvaluation.totalQuestions}
                 </span>
                 <span className="stat-lbl">CORRECT ANSWERS</span>
               </div>
 
               <div className="stat-box">
-                <span className="stat-val">{finalEvaluation.timeTakenSeconds}s</span>
-                <span className="stat-lbl">TIME TAKEN</span>
+                <span className="stat-val">{finalEvaluation.totalScore} / 300</span>
+                <span className="stat-lbl">SCORE</span>
+              </div>
+
+              <div className="stat-box">
+                <span className="stat-val">{formatTime(finalEvaluation.totalTimeSeconds)}</span>
+                <span className="stat-lbl">TIME</span>
+              </div>
+
+              <div className="stat-box rank-box">
+                <span className="stat-val">#{calculatedRank || 1}</span>
+                <span className="stat-lbl">GLOBAL RANK</span>
               </div>
             </div>
 
-            {/* Achievement Badge (Purely Objective Score Based) */}
+            {/* Achievement Badge */}
             <div className="achievement-card">
-              <span className="achievement-tag">ACHIEVEMENT UNLOCKED</span>
+              <span className="achievement-tag">PERFORMANCE LEVEL</span>
               <h3 className="achievement-title">{finalEvaluation.achievement.title}</h3>
               <p className="achievement-desc">{finalEvaluation.achievement.description}</p>
             </div>
@@ -469,38 +634,44 @@ export default function VultureChallengeSection() {
               </a>
             </div>
 
-            {/* Secondary Action Row */}
+            {/* Action Row */}
             <div className="results-action-row">
               <button
                 type="button"
-                className="quiz-secondary-btn"
+                className="quiz-primary-btn"
                 onClick={handleOpenLeaderboard}
               >
                 <Trophy size={16} />
-                <span>VIEW LEADERBOARD</span>
+                <span>VIEW GLOBAL LEADERBOARD &rarr;</span>
               </button>
 
               <button
                 type="button"
                 className="quiz-secondary-btn"
-                onClick={() => {
-                  const meetSection = document.getElementById('meet-the-vulture');
-                  if (meetSection) meetSection.scrollIntoView({ behavior: 'smooth' });
-                }}
+                onClick={handleRetakeChallenge}
               >
-                <span>LEARN MORE ABOUT PROJECT JATAYU &rarr;</span>
+                <RotateCcw size={16} />
+                <span>RETAKE CHALLENGE</span>
               </button>
             </div>
           </div>
         )}
 
         {/* ===================================================================
-            6. LEADERBOARD STATE
+            6. PUBLIC GLOBAL LEADERBOARD STATE
             =================================================================== */}
         {viewState === 'leaderboard' && (
           <div className="quiz-card leaderboard-card">
             <div className="leaderboard-header">
-              <h2 className="leaderboard-title">THE VULTURE GUARDIANS</h2>
+              <div className="live-status-pill">
+                <span className="live-pulse-dot"></span>
+                <span>LIVE LEADERBOARD</span>
+              </div>
+              <span className="live-subtext">Updated as participants complete the challenge.</span>
+
+              <h2 className="leaderboard-title" style={{ marginTop: '0.35rem' }}>
+                THE VULTURE GUARDIANS
+              </h2>
               <p className="leaderboard-subtitle">
                 "Who knows the most about the guardians of our skies?"
               </p>
@@ -513,7 +684,7 @@ export default function VultureChallengeSection() {
                 className={`lb-tab-btn ${lbFilterTab === 'ALL' ? 'active' : ''}`}
                 onClick={() => setLbFilterTab('ALL')}
               >
-                ALL PARTICIPANTS
+                ALL
               </button>
               <button
                 type="button"
@@ -531,10 +702,10 @@ export default function VultureChallengeSection() {
               </button>
             </div>
 
-            {/* Leaderboard Table */}
+            {/* Desktop Table View */}
             <div className="leaderboard-table-wrap">
               {activeFilteredLeaderboard.length === 0 ? (
-                <div className="lb-empty-msg">No participants found in this category yet.</div>
+                <div className="lb-empty-msg">No participants on the global leaderboard yet. Be the first to take the challenge!</div>
               ) : (
                 <table className="leaderboard-table">
                   <thead>
@@ -542,24 +713,42 @@ export default function VultureChallengeSection() {
                       <th>RANK</th>
                       <th>NAME</th>
                       <th>ROTARACT CLUB</th>
+                      <th>CORRECT</th>
                       <th>SCORE</th>
+                      <th>TIME</th>
                     </tr>
                   </thead>
                   <tbody>
                     {activeFilteredLeaderboard.map((item, index) => {
                       const rankNum = index + 1;
                       const rankClass = rankNum <= 3 ? `rank-${rankNum}` : '';
+                      const isCurrentUser =
+                        (activeAttemptId && item.attemptId === activeAttemptId) ||
+                        (playerName && item.name.trim().toLowerCase() === playerName.trim().toLowerCase());
+
+                      const correctVal = item.correctAnswers !== undefined ? item.correctAnswers : (item.totalCorrect || 0);
+                      const totalQ = item.totalQuestions || 15;
+                      const scoreVal = item.totalScore !== undefined ? item.totalScore : (item.score || 0);
+                      const timeSecs = item.totalTimeSeconds !== undefined ? item.totalTimeSeconds : (item.timeTakenSeconds || 0);
 
                       return (
-                        <tr key={item.id || index}>
+                        <tr
+                          key={item.attemptId || item.id || index}
+                          className={isCurrentUser ? 'current-user-row' : ''}
+                        >
                           <td>
                             <span className={`rank-badge ${rankClass}`}>
                               {rankNum < 10 ? `0${rankNum}` : rankNum}
                             </span>
                           </td>
-                          <td className="participant-name-col">{item.name}</td>
+                          <td className="participant-name-col">
+                            <span>{item.name}</span>
+                            {isCurrentUser && <span className="current-user-tag">YOU</span>}
+                          </td>
                           <td className="club-col">{item.club}</td>
-                          <td className="score-col">{item.score}</td>
+                          <td className="correct-col">{correctVal}/{totalQ}</td>
+                          <td className="score-col">{scoreVal}</td>
+                          <td className="time-col">{formatTime(timeSecs)}</td>
                         </tr>
                       );
                     })}
@@ -568,27 +757,87 @@ export default function VultureChallengeSection() {
               )}
             </div>
 
-            {/* Leaderboard Actions */}
-            <div className="results-action-row" style={{ marginTop: '1rem' }}>
-              <button
-                type="button"
-                className="quiz-secondary-btn"
-                onClick={handleRetakeChallenge}
-              >
-                <RotateCcw size={16} />
-                <span>RETAKE CHALLENGE</span>
-              </button>
+            {/* Mobile Responsive List Cards View */}
+            <div className="leaderboard-mobile-list">
+              {activeFilteredLeaderboard.length === 0 ? (
+                <div className="lb-empty-msg">No participants on the global leaderboard yet.</div>
+              ) : (
+                activeFilteredLeaderboard.map((item, index) => {
+                  const rankNum = index + 1;
+                  const isCurrentUser =
+                    (activeAttemptId && item.attemptId === activeAttemptId) ||
+                    (playerName && item.name.trim().toLowerCase() === playerName.trim().toLowerCase());
 
-              <a
-                href="https://forms.gle/uwx9YqtKBdHVku8J7"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="quiz-primary-btn"
-                style={{ textDecoration: 'none' }}
-              >
-                <span>JOIN THE JATAYU TREK &rarr;</span>
-                <ExternalLink size={16} />
-              </a>
+                  const correctVal = item.correctAnswers !== undefined ? item.correctAnswers : (item.totalCorrect || 0);
+                  const scoreVal = item.totalScore !== undefined ? item.totalScore : (item.score || 0);
+                  const timeSecs = item.totalTimeSeconds !== undefined ? item.totalTimeSeconds : (item.timeTakenSeconds || 0);
+
+                  return (
+                    <div
+                      key={item.attemptId || item.id || index}
+                      className={`lb-mobile-card ${isCurrentUser ? 'current-user-card' : ''}`}
+                    >
+                      <div className="lb-m-top">
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.6rem' }}>
+                          <span className={`rank-badge ${rankNum <= 3 ? `rank-${rankNum}` : ''}`}>
+                            {rankNum < 10 ? `0${rankNum}` : rankNum}
+                          </span>
+                          <div>
+                            <div className="lb-m-name">
+                              {item.name} {isCurrentUser && <span className="current-user-tag">YOU</span>}
+                            </div>
+                            <div className="lb-m-club">{item.club}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="lb-m-stats">
+                        <div className="lb-m-stat-item">
+                          <span className="lb-m-lbl">CORRECT</span>
+                          <span className="lb-m-val">{correctVal}/15</span>
+                        </div>
+                        <div className="lb-m-stat-item">
+                          <span className="lb-m-lbl">SCORE</span>
+                          <span className="lb-m-val">{scoreVal}</span>
+                        </div>
+                        <div className="lb-m-stat-item">
+                          <span className="lb-m-lbl">TIME</span>
+                          <span className="lb-m-val">{formatTime(timeSecs)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Bottom Competition Conversion Card */}
+            <div className="bottom-conversion-card">
+              <h3 className="conv-title">THINK YOU CAN DO BETTER?</h3>
+              <p className="conv-copy">
+                Test your knowledge of India's vultures, their ecosystems and the conservation challenges they face.
+              </p>
+
+              <div className="results-action-row" style={{ width: '100%' }}>
+                <button
+                  type="button"
+                  className="quiz-primary-btn"
+                  onClick={handleStartIntro}
+                >
+                  <span>TAKE THE VULTURE CHALLENGE &rarr;</span>
+                </button>
+
+                <a
+                  href="https://forms.gle/uwx9YqtKBdHVku8J7"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="quiz-secondary-btn"
+                  style={{ textDecoration: 'none' }}
+                >
+                  <span>JOIN THE JATAYU TREK &rarr;</span>
+                  <ExternalLink size={16} />
+                </a>
+              </div>
             </div>
           </div>
         )}
