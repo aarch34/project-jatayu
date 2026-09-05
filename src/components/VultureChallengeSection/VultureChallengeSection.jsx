@@ -1,18 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Trophy,
   Shield,
-  Award,
-  ChevronRight,
-  UserCheck,
-  Calendar,
-  MapPin,
   ExternalLink,
   RotateCcw,
   Sparkles,
   CheckCircle,
   Clock,
-  Zap,
   AlertTriangle,
   RefreshCw,
 } from 'lucide-react';
@@ -26,14 +20,14 @@ import {
   getParticipantRank,
   subscribeLeaderboardUpdates,
 } from './leaderboardStore';
-import { isSupabaseConfigured } from '../../lib/supabaseClient';
+import { saveUserProfileToCookies, loadUserProfileFromCookies } from '../../utils/cookieUtils';
 import './VultureChallengeSection.css';
 
 export default function VultureChallengeSection() {
   // Flow state: 'intro' | 'register' | 'play' | 'level-unlock' | 'submitting' | 'results' | 'leaderboard'
   const [viewState, setViewState] = useState('intro');
 
-  // Player info
+  // Player info (initialized with cookie values if previously saved on this device)
   const [playerName, setPlayerName] = useState('');
   const [rotaractClub, setRotaractClub] = useState('');
   const [isNotRotaractor, setIsNotRotaractor] = useState(false);
@@ -70,8 +64,16 @@ export default function VultureChallengeSection() {
   const [supabaseConfigError, setSupabaseConfigError] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Load persistent user profile from cookies on mount
+  useEffect(() => {
+    const storedProfile = loadUserProfileFromCookies();
+    if (storedProfile.name) setPlayerName(storedProfile.name);
+    if (storedProfile.club) setRotaractClub(storedProfile.club);
+    if (storedProfile.isNotRotaractor !== undefined) setIsNotRotaractor(storedProfile.isNotRotaractor);
+  }, []);
+
   // Helper to load live global leaderboard entries from Supabase
-  const loadLeaderboardData = async () => {
+  const loadLeaderboardData = useCallback(async () => {
     setIsRefreshing(true);
     const res = await fetchLeaderboardEntries();
     if (res.success) {
@@ -85,7 +87,7 @@ export default function VultureChallengeSection() {
       }
     }
     setIsRefreshing(false);
-  };
+  }, []);
 
   // Fetch initial global leaderboard from Supabase and subscribe to realtime Postgres updates
   useEffect(() => {
@@ -98,7 +100,7 @@ export default function VultureChallengeSection() {
     return () => {
       unsubscribe();
     };
-  }, []);
+  }, [loadLeaderboardData]);
 
   // Auto-polling (every 5s) and window focus refetch for global sync
   useEffect(() => {
@@ -118,13 +120,49 @@ export default function VultureChallengeSection() {
       if (pollInterval) clearInterval(pollInterval);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [viewState]);
+  }, [viewState, loadLeaderboardData]);
 
   // Current level questions subset
   const currentLevelQuestions = session
     ? session.questions.filter((q) => q.level === currentLevelId)
     : [];
   const currentQuestion = currentLevelQuestions[currentQuestionIndexInLevel];
+
+  // Advance question or trigger round completion
+  const advanceQuestionFlow = useCallback((latestAnswers) => {
+    setSelectedOptionForCurrent(null);
+    setIsQuestionLocked(false);
+
+    if (currentQuestionIndexInLevel < currentLevelQuestions.length - 1) {
+      setCurrentQuestionIndexInLevel((prev) => prev + 1);
+    } else {
+      const completedLevelObj = QUIZ_LEVELS.find((l) => l.id === currentLevelId);
+      setCompletedLevelInfo(completedLevelObj);
+
+      if (currentLevelId < 3) {
+        setViewState('level-unlock');
+      } else {
+        finishQuiz(latestAnswers);
+      }
+    }
+  }, [currentQuestionIndexInLevel, currentLevelQuestions.length, currentLevelId]);
+
+  // Handle automatic timer expiry (0 points, record unanswered, auto-advance)
+  const handleTimerExpiry = useCallback(() => {
+    setIsQuestionLocked(true);
+    if (!currentQuestion) return;
+
+    setUserAnswers((prevAnswers) => {
+      const newAnswers = {
+        ...prevAnswers,
+        [currentQuestion.id]: null,
+      };
+      setTimeout(() => {
+        advanceQuestionFlow(newAnswers);
+      }, 800);
+      return newAnswers;
+    });
+  }, [currentQuestion, advanceQuestionFlow]);
 
   // Handle per-question countdown timer interval and time accumulation
   useEffect(() => {
@@ -155,23 +193,7 @@ export default function VultureChallengeSection() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [viewState, currentLevelId, currentQuestionIndexInLevel, session]);
-
-  // Handle automatic timer expiry (0 points, record unanswered, auto-advance)
-  const handleTimerExpiry = () => {
-    setIsQuestionLocked(true);
-    if (!currentQuestion) return;
-
-    const newAnswers = {
-      ...userAnswers,
-      [currentQuestion.id]: null,
-    };
-    setUserAnswers(newAnswers);
-
-    setTimeout(() => {
-      advanceQuestionFlow(newAnswers);
-    }, 800);
-  };
+  }, [viewState, currentLevelId, currentQuestionIndexInLevel, currentQuestion, isQuestionLocked, handleTimerExpiry]);
 
   // Update club field when non-Rotaractor checkbox toggles
   const handleCheckboxChange = (e) => {
@@ -192,11 +214,15 @@ export default function VultureChallengeSection() {
   // Handle Registration Submit
   const handleRegisterSubmit = (e) => {
     e.preventDefault();
-    if (!playerName.trim()) {
+    const trimmedName = playerName.trim();
+    if (!trimmedName) {
       setNameError('Please enter your full name to start the competition.');
       return;
     }
     setNameError('');
+
+    // Persist competitor info to browser cookies for returning sessions
+    saveUserProfileToCookies(trimmedName, rotaractClub.trim(), isNotRotaractor);
 
     // Create new session with unique attemptId
     const newSession = createQuizSession();
@@ -241,25 +267,6 @@ export default function VultureChallengeSection() {
     }, 400);
   };
 
-  // Advance question or trigger round completion
-  const advanceQuestionFlow = (latestAnswers) => {
-    setSelectedOptionForCurrent(null);
-    setIsQuestionLocked(false);
-
-    if (currentQuestionIndexInLevel < currentLevelQuestions.length - 1) {
-      setCurrentQuestionIndexInLevel((prev) => prev + 1);
-    } else {
-      const completedLevelObj = QUIZ_LEVELS.find((l) => l.id === currentLevelId);
-      setCompletedLevelInfo(completedLevelObj);
-
-      if (currentLevelId < 3) {
-        setViewState('level-unlock');
-      } else {
-        finishQuiz(latestAnswers);
-      }
-    }
-  };
-
   // Unlock and start next round
   const handleProceedToNextLevel = () => {
     const nextLevelId = currentLevelId + 1;
@@ -278,8 +285,8 @@ export default function VultureChallengeSection() {
     setFinalEvaluation(evalResults);
 
     const submissionData = {
-      name: playerName,
-      club: isNotRotaractor ? 'Participant' : (rotaractClub || 'Participant'),
+      name: playerName.trim(),
+      club: isNotRotaractor ? 'Participant' : (rotaractClub.trim() || 'Participant'),
       isRotaractor: !isNotRotaractor,
       correctAnswers: evalResults.correctAnswers,
       totalQuestions: evalResults.totalQuestions, // 15

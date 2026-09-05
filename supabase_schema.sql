@@ -26,13 +26,17 @@ ON quiz_attempts (correct_answers DESC, time_seconds ASC, completed_at ASC);
 -- 3. Enable Row Level Security (RLS)
 ALTER TABLE quiz_attempts ENABLE ROW LEVEL SECURITY;
 
--- 4. Policy: Public READ access for global leaderboard display
+-- 4. Drop existing policies if already created to allow re-running
+DROP POLICY IF EXISTS "Allow public read access to leaderboard" ON quiz_attempts;
+DROP POLICY IF EXISTS "Allow public insert access for quiz submissions" ON quiz_attempts;
+
+-- 5. Policy: Public READ access for global leaderboard display
 CREATE POLICY "Allow public read access to leaderboard"
 ON quiz_attempts
 FOR SELECT
 USING (true);
 
--- 5. Policy: Public INSERT access for quiz submissions
+-- 6. Policy: Public INSERT access for quiz submissions
 CREATE POLICY "Allow public insert access for quiz submissions"
 ON quiz_attempts
 FOR INSERT
