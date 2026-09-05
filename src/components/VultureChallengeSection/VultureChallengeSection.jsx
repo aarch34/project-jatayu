@@ -445,17 +445,17 @@ export default function VultureChallengeSection() {
               <div className="round-preview-item">
                 <span className="rp-tag">ROUND 01</span>
                 <span className="rp-title">VULTURE 101</span>
-                <span className="rp-detail">20s / Q • 10 Pts</span>
+                <span className="rp-detail">25s / Q • 10 Pts</span>
               </div>
               <div className="round-preview-item">
                 <span className="rp-tag">ROUND 02</span>
                 <span className="rp-title">THE ECOLOGIST</span>
-                <span className="rp-detail">25s / Q • 20 Pts</span>
+                <span className="rp-detail">30s / Q • 20 Pts</span>
               </div>
               <div className="round-preview-item">
                 <span className="rp-tag">ROUND 03</span>
                 <span className="rp-title">THE GUARDIAN</span>
-                <span className="rp-detail">30s / Q • 30 Pts</span>
+                <span className="rp-detail">35s / Q • 30 Pts</span>
               </div>
             </div>
 
