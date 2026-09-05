@@ -1122,6 +1122,69 @@
   font-size: 0.98rem;
 }
 
+/* Submission Loading & Error UI */
+.submission-loading-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  padding: 3rem 1.5rem;
+  text-align: center;
+}
+
+.spinner-ring {
+  width: 48px;
+  height: 48px;
+  border: 4px solid rgba(245, 186, 66, 0.2);
+  border-top-color: var(--color-sunlight-gold, #f5ba42);
+  border-radius: 50%;
+  animation: spinRing 0.8s linear infinite;
+}
+
+@keyframes spinRing {
+  to { transform: rotate(360deg); }
+}
+
+.submission-error-card {
+  background: rgba(45, 12, 12, 0.9);
+  border: 1px solid #ff5252;
+  border-radius: 12px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  text-align: center;
+  margin: 1rem 0;
+}
+
+.submission-error-title {
+  font-family: 'Cinzel', serif;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #ff6b6b;
+  margin: 0;
+}
+
+.submission-error-msg {
+  font-size: 0.9rem;
+  color: #f5d0d0;
+  max-width: 500px;
+  margin: 0;
+}
+
+.retry-btn {
+  background: linear-gradient(135deg, #ff5252 0%, #d32f2f 100%) !important;
+  color: #ffffff !important;
+  border-color: #ff8a80 !important;
+}
+
+.retry-btn:hover {
+  background: #ffffff !important;
+  color: #d32f2f !important;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .quiz-card {
@@ -1159,3 +1222,4 @@
     width: 100%;
   }
 }
+

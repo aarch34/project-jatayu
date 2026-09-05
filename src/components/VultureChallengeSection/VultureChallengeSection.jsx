@@ -13,6 +13,8 @@ import {
   CheckCircle,
   Clock,
   Zap,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { QUIZ_LEVELS } from './quizData';
 import { createQuizSession, evaluateQuizSession } from './quizValidator';
@@ -24,10 +26,11 @@ import {
   getParticipantRank,
   subscribeLeaderboardUpdates,
 } from './leaderboardStore';
+import { isSupabaseConfigured } from '../../lib/supabaseClient';
 import './VultureChallengeSection.css';
 
 export default function VultureChallengeSection() {
-  // Flow state: 'intro' | 'register' | 'play' | 'level-unlock' | 'results' | 'leaderboard'
+  // Flow state: 'intro' | 'register' | 'play' | 'level-unlock' | 'submitting' | 'results' | 'leaderboard'
   const [viewState, setViewState] = useState('intro');
 
   // Player info
@@ -59,15 +62,34 @@ export default function VultureChallengeSection() {
   const [calculatedRank, setCalculatedRank] = useState(null);
   const [leaderboardEntries, setLeaderboardEntries] = useState([]);
   const [lbFilterTab, setLbFilterTab] = useState('ALL');
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Fetch initial global leaderboard from server API and subscribe to real-time tab updates
+  // Submission & Supabase status states
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState(null);
+  const [pendingSubmissionData, setPendingSubmissionData] = useState(null);
+  const [supabaseConfigError, setSupabaseConfigError] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Helper to load live global leaderboard entries from Supabase
+  const loadLeaderboardData = async () => {
+    setIsRefreshing(true);
+    const res = await fetchLeaderboardEntries();
+    if (res.success) {
+      setLeaderboardEntries(res.data);
+      setSupabaseConfigError(null);
+    } else {
+      if (res.error === 'SUPABASE_NOT_CONFIGURED') {
+        setSupabaseConfigError('Supabase is not configured. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your .env file and run supabase_schema.sql.');
+      } else {
+        setSupabaseConfigError(res.message || 'Failed to connect to Supabase database.');
+      }
+    }
+    setIsRefreshing(false);
+  };
+
+  // Fetch initial global leaderboard from Supabase and subscribe to realtime Postgres updates
   useEffect(() => {
-    const loadEntries = async () => {
-      const data = await fetchLeaderboardEntries();
-      setLeaderboardEntries(data);
-    };
-    loadEntries();
+    loadLeaderboardData();
 
     const unsubscribe = subscribeLeaderboardUpdates((updatedData) => {
       setLeaderboardEntries(updatedData);
@@ -78,22 +100,17 @@ export default function VultureChallengeSection() {
     };
   }, []);
 
-  // Continuous auto-polling (every 4s) and window focus refetch for cross-device real-time sync
+  // Auto-polling (every 5s) and window focus refetch for global sync
   useEffect(() => {
     let pollInterval = null;
 
-    const refreshServerData = async () => {
-      const data = await fetchLeaderboardEntries();
-      setLeaderboardEntries(data);
-    };
-
     if (viewState === 'leaderboard' || viewState === 'intro') {
-      refreshServerData();
-      pollInterval = setInterval(refreshServerData, 4000);
+      loadLeaderboardData();
+      pollInterval = setInterval(loadLeaderboardData, 5000);
     }
 
     const handleFocus = () => {
-      refreshServerData();
+      loadLeaderboardData();
     };
     window.addEventListener('focus', handleFocus);
 
@@ -193,6 +210,8 @@ export default function VultureChallengeSection() {
     setTotalTimeSpentSeconds(0);
     setLiveScore(0);
     setIsSubmitting(false);
+    setSubmissionError(null);
+    setPendingSubmissionData(null);
     setViewState('play');
   };
 
@@ -251,16 +270,14 @@ export default function VultureChallengeSection() {
     setViewState('play');
   };
 
-  // Evaluate final quiz, store exact stats, and save to global persistent API
+  // Evaluate final quiz and submit directly to Supabase with error handling & retry capability
   const finishQuiz = async (finalAnswers) => {
     if (isSubmitting) return;
-    setIsSubmitting(true);
 
     const evalResults = evaluateQuizSession(session, finalAnswers, totalTimeSpentSeconds);
     setFinalEvaluation(evalResults);
 
     const submissionData = {
-      attemptId: session.sessionId,
       name: playerName,
       club: isNotRotaractor ? 'Participant' : (rotaractClub || 'Participant'),
       isRotaractor: !isNotRotaractor,
@@ -271,29 +288,75 @@ export default function VultureChallengeSection() {
       totalScore: evalResults.totalScore,
       score: evalResults.totalScore,
       totalTimeSeconds: evalResults.totalTimeSeconds,
-      timeTakenSeconds: evalResults.totalTimeSeconds,
       completedAt: evalResults.completedAt,
     };
 
-    // Save to disk-persisted shared global API endpoint
-    const updatedGlobalEntries = await saveLeaderboardEntry(submissionData);
-    setLeaderboardEntries(updatedGlobalEntries);
+    setPendingSubmissionData(submissionData);
+    setViewState('submitting');
+    setIsSubmitting(true);
+    setSubmissionError(null);
 
-    // Calculate live position rank
-    const playerRank = getParticipantRank(
-      updatedGlobalEntries,
-      session.sessionId,
-      submissionData
-    );
-    setCalculatedRank(playerRank);
+    const saveResult = await saveLeaderboardEntry(submissionData);
 
-    setViewState('results');
-    setIsSubmitting(false);
+    if (saveResult.success) {
+      setIsSubmitting(false);
+      setSubmissionError(null);
+      setPendingSubmissionData(null);
+      setLeaderboardEntries(saveResult.entries);
+
+      const insertedId = saveResult.insertedRecord ? saveResult.insertedRecord.id : null;
+      if (insertedId) {
+        setActiveAttemptId(insertedId);
+      }
+
+      const playerRank = getParticipantRank(
+        saveResult.entries,
+        insertedId,
+        submissionData
+      );
+      setCalculatedRank(playerRank);
+      setViewState('results');
+    } else {
+      setIsSubmitting(false);
+      setSubmissionError(saveResult.message || 'Failed to submit score to Supabase.');
+    }
+  };
+
+  // Retry submission if Supabase query failed
+  const handleRetrySubmission = async () => {
+    if (!pendingSubmissionData || isSubmitting) return;
+
+    setIsSubmitting(true);
+    setSubmissionError(null);
+
+    const saveResult = await saveLeaderboardEntry(pendingSubmissionData);
+
+    if (saveResult.success) {
+      setIsSubmitting(false);
+      setSubmissionError(null);
+      setPendingSubmissionData(null);
+      setLeaderboardEntries(saveResult.entries);
+
+      const insertedId = saveResult.insertedRecord ? saveResult.insertedRecord.id : null;
+      if (insertedId) {
+        setActiveAttemptId(insertedId);
+      }
+
+      const playerRank = getParticipantRank(
+        saveResult.entries,
+        insertedId,
+        pendingSubmissionData
+      );
+      setCalculatedRank(playerRank);
+      setViewState('results');
+    } else {
+      setIsSubmitting(false);
+      setSubmissionError(saveResult.message || 'Retry failed. Please check your internet connection.');
+    }
   };
 
   const handleOpenLeaderboard = async () => {
-    const data = await fetchLeaderboardEntries();
-    setLeaderboardEntries(data);
+    await loadLeaderboardData();
     setViewState('leaderboard');
   };
 
@@ -341,6 +404,15 @@ export default function VultureChallengeSection() {
       </div>
 
       <div className="quiz-container">
+        {/* Supabase Environment Warning Banner */}
+        {supabaseConfigError && viewState !== 'play' && (
+          <div className="submission-error-card" style={{ width: '100%', marginBottom: '1.5rem' }}>
+            <AlertTriangle size={24} color="#ff6b6b" />
+            <h4 className="submission-error-title">SUPABASE DATABASE NOTICE</h4>
+            <p className="submission-error-msg">{supabaseConfigError}</p>
+          </div>
+        )}
+
         {/* ===================================================================
             1. INTRO STATE
             =================================================================== */}
@@ -556,7 +628,48 @@ export default function VultureChallengeSection() {
         )}
 
         {/* ===================================================================
-            5. FINAL RESULTS & LIVE RANK SCREEN
+            5. SUBMITTING & ERROR RETRY STATE
+            =================================================================== */}
+        {viewState === 'submitting' && (
+          <div className="quiz-card">
+            {isSubmitting ? (
+              <div className="submission-loading-overlay">
+                <div className="spinner-ring"></div>
+                <h3 className="level-complete-title" style={{ fontSize: '1.4rem' }}>
+                  SUBMITTING SCORE TO SUPABASE...
+                </h3>
+                <p className="quiz-copy">
+                  Connecting to shared global database to register your rank.
+                </p>
+              </div>
+            ) : submissionError ? (
+              <div className="submission-error-card">
+                <AlertTriangle size={36} color="#ff6b6b" />
+                <h3 className="submission-error-title">SUBMISSION FAILED</h3>
+                <p className="submission-error-msg">{submissionError}</p>
+                <div className="results-action-row" style={{ marginTop: '1rem' }}>
+                  <button
+                    type="button"
+                    className="quiz-primary-btn retry-btn"
+                    onClick={handleRetrySubmission}
+                  >
+                    <span>RETRY SUBMISSION &rarr;</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="quiz-secondary-btn"
+                    onClick={handleOpenLeaderboard}
+                  >
+                    <span>VIEW LEADERBOARD ANYWAY</span>
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {/* ===================================================================
+            6. FINAL RESULTS & LIVE RANK SCREEN
             =================================================================== */}
         {viewState === 'results' && finalEvaluation && (
           <div className="quiz-card quiz-results-card">
@@ -664,16 +777,29 @@ export default function VultureChallengeSection() {
         )}
 
         {/* ===================================================================
-            6. PUBLIC GLOBAL LEADERBOARD STATE
+            7. PUBLIC GLOBAL LEADERBOARD STATE
             =================================================================== */}
         {viewState === 'leaderboard' && (
           <div className="quiz-card leaderboard-card">
             <div className="leaderboard-header">
-              <div className="live-status-pill">
-                <span className="live-pulse-dot"></span>
-                <span>LIVE LEADERBOARD</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div className="live-status-pill">
+                  <span className="live-pulse-dot"></span>
+                  <span>LIVE LEADERBOARD</span>
+                </div>
+                <button
+                  type="button"
+                  className="quiz-secondary-btn"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', gap: '0.35rem' }}
+                  onClick={loadLeaderboardData}
+                  disabled={isRefreshing}
+                >
+                  <RefreshCw size={12} className={isRefreshing ? 'spinner-ring' : ''} style={isRefreshing ? { width: 12, height: 12, borderWidth: 2 } : {}} />
+                  <span>REFRESH</span>
+                </button>
               </div>
-              <span className="live-subtext">Updated as participants complete the challenge.</span>
+
+              <span className="live-subtext">Updated in real-time from Supabase shared database.</span>
 
               <h2 className="leaderboard-title" style={{ marginTop: '0.35rem' }}>
                 THE VULTURE GUARDIANS
@@ -711,7 +837,7 @@ export default function VultureChallengeSection() {
             {/* Desktop Table View */}
             <div className="leaderboard-table-wrap">
               {activeFilteredLeaderboard.length === 0 ? (
-                <div className="lb-empty-msg">No participants on the global leaderboard yet. Be the first to take the challenge!</div>
+                <div className="lb-empty-msg">No participants yet. Be the first Vulture Guardian!</div>
               ) : (
                 <table className="leaderboard-table">
                   <thead>
@@ -729,16 +855,16 @@ export default function VultureChallengeSection() {
                       const rankNum = index + 1;
                       const rankClass = rankNum <= 3 ? `rank-${rankNum}` : '';
                       const isCurrentUser =
-                        activeAttemptId && item.attemptId === activeAttemptId;
+                        activeAttemptId && (item.id === activeAttemptId || item.attemptId === activeAttemptId);
 
-                      const correctVal = item.correctAnswers !== undefined ? item.correctAnswers : (item.totalCorrect || 0);
+                      const correctVal = item.correctAnswers !== undefined ? item.correctAnswers : (item.correct_answers || 0);
                       const totalQ = item.totalQuestions || 15;
                       const scoreVal = item.totalScore !== undefined ? item.totalScore : (item.score || 0);
-                      const timeSecs = item.totalTimeSeconds !== undefined ? item.totalTimeSeconds : (item.timeTakenSeconds || 0);
+                      const timeSecs = item.totalTimeSeconds !== undefined ? item.totalTimeSeconds : (item.time_seconds || 0);
 
                       return (
                         <tr
-                          key={item.attemptId || item.id || index}
+                          key={item.id || item.attemptId || index}
                           className={isCurrentUser ? 'current-user-row' : ''}
                         >
                           <td>
@@ -765,20 +891,20 @@ export default function VultureChallengeSection() {
             {/* Mobile Responsive List Cards View */}
             <div className="leaderboard-mobile-list">
               {activeFilteredLeaderboard.length === 0 ? (
-                <div className="lb-empty-msg">No participants on the global leaderboard yet.</div>
+                <div className="lb-empty-msg">No participants yet. Be the first Vulture Guardian!</div>
               ) : (
                 activeFilteredLeaderboard.map((item, index) => {
                   const rankNum = index + 1;
                   const isCurrentUser =
-                    activeAttemptId && item.attemptId === activeAttemptId;
+                    activeAttemptId && (item.id === activeAttemptId || item.attemptId === activeAttemptId);
 
-                  const correctVal = item.correctAnswers !== undefined ? item.correctAnswers : (item.totalCorrect || 0);
+                  const correctVal = item.correctAnswers !== undefined ? item.correctAnswers : (item.correct_answers || 0);
                   const scoreVal = item.totalScore !== undefined ? item.totalScore : (item.score || 0);
-                  const timeSecs = item.totalTimeSeconds !== undefined ? item.totalTimeSeconds : (item.timeTakenSeconds || 0);
+                  const timeSecs = item.totalTimeSeconds !== undefined ? item.totalTimeSeconds : (item.time_seconds || 0);
 
                   return (
                     <div
-                      key={item.attemptId || item.id || index}
+                      key={item.id || item.attemptId || index}
                       className={`lb-mobile-card ${isCurrentUser ? 'current-user-card' : ''}`}
                     >
                       <div className="lb-m-top">
